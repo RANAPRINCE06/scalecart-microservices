@@ -40,6 +40,9 @@ public class Order extends BaseEntity<UUID> {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "payment_id")
+    private UUID paymentId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private OrderStatus status;

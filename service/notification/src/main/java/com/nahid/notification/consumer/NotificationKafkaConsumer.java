@@ -48,8 +48,7 @@ public class NotificationKafkaConsumer {
         } catch (Exception e) {
             log.error("Error processing payment notification for paymentId: {}. Error: {}",
                     paymentNotificationDto.getPaymentId(), e.getMessage(), e);
-            acknowledgment.acknowledge();
-
+            throw new RuntimeException("Failed to process payment notification, delegating to Kafka errorHandler/DLT", e);
         }
     }
 
@@ -96,15 +95,7 @@ public class NotificationKafkaConsumer {
         } catch (Exception e) {
             log.error("Error processing order notification for orderId: {}. Error: {}",
                     orderEventDto.getOrderId(), e.getMessage(), e);
-           //acknowledgment.acknowledge();
-             handleOrderNotificationError(orderEventDto, e);
+            throw new RuntimeException("Failed to process order notification, delegating to Kafka errorHandler/DLT", e);
         }
     }
-
-
-
-    private void handleOrderNotificationError(OrderEventDto orderEventDto, Exception e) {
-        log.error("Handling order notification error for orderId: {}", orderEventDto.getOrderId());
-
-    }
-}
+}

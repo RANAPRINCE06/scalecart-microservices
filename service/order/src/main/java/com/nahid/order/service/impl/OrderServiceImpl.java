@@ -168,6 +168,77 @@ public class OrderServiceImpl implements OrderService {
         return orderRepository.countByUserIdAndStatus(userId, status);
     }
 
+    @Override
+    @Transactional
+    @Auditable(eventType = "UPDATE", entityName = ORDER, action = "PROCESS_PAYMENT_RESULT")
+    public void processPaymentResult(com.nahid.order.dto.event.PaymentResultEventDto paymentResultEvent) {
+        if (paymentResultEvent == null || paymentResultEvent.getOrderId() == null) {
+            log.warn("Received null or invalid PaymentResultEvent");
+            return;
+        }
+
+        UUID orderId = paymentResultEvent.getOrderId();
+        java.util.Optional<Order> optionalOrder = orderRepository.findById(orderId);
+
+        if (optionalOrder.isEmpty()) {
+            log.warn("Order not found for orderId: {}, skipping payment result processing safely", orderId);
+            return;
+        }
+
+        Order order = optionalOrder.get();
+        com.nahid.order.enums.PaymentStatus paymentStatus = paymentResultEvent.getStatus();
+
+        // Idempotency check: if paymentId already processed or order already in expected state
+        if (paymentResultEvent.getPaymentId() != null && paymentResultEvent.getPaymentId().equals(order.getPaymentId())) {
+            log.info("PaymentResult for paymentId {} has already been processed for order {}",
+                    paymentResultEvent.getPaymentId(), orderId);
+            return;
+        }
+
+        if (paymentStatus == com.nahid.order.enums.PaymentStatus.COMPLETED) {
+            if (order.getStatus() == OrderStatus.CONFIRMED) {
+                log.info("Order {} is already in status CONFIRMED. Skipping duplicate payment result processing for paymentId {}",
+                        orderId, paymentResultEvent.getPaymentId());
+                return;
+            }
+
+            orderStatusService.validateStatusTransition(order.getStatus(), OrderStatus.CONFIRMED);
+            order.setStatus(OrderStatus.CONFIRMED);
+            order.setPaymentId(paymentResultEvent.getPaymentId());
+            Order savedOrder = orderRepository.save(order);
+
+            log.info("Payment SUCCESS: Transitioned Order {} from PENDING to CONFIRMED (Payment ID: {})",
+                    orderId, paymentResultEvent.getPaymentId());
+            publishOrderEvent(savedOrder, OrderStatus.CONFIRMED);
+
+        } else if (paymentStatus == com.nahid.order.enums.PaymentStatus.FAILED) {
+            if (order.getStatus() == OrderStatus.CANCELLED) {
+                log.info("Order {} is already in status CANCELLED. Skipping duplicate payment result processing for paymentId {}",
+                        orderId, paymentResultEvent.getPaymentId());
+                return;
+            }
+
+            orderStatusService.validateStatusTransition(order.getStatus(), OrderStatus.CANCELLED);
+            order.setStatus(OrderStatus.CANCELLED);
+            order.setPaymentId(paymentResultEvent.getPaymentId());
+            Order savedOrder = orderRepository.save(order);
+
+            // Release inventory reservation for cancelled order
+            try {
+                productPurchaseService.releaseReservation(order.getOrderNumber());
+            } catch (Exception e) {
+                log.warn("Failed to release inventory reservation for cancelled order {}: {}",
+                        order.getOrderNumber(), e.getMessage());
+            }
+
+            log.info("Payment FAILED: Transitioned Order {} to CANCELLED (Payment ID: {}, Reason: {})",
+                    orderId, paymentResultEvent.getPaymentId(), paymentResultEvent.getFailureReason());
+            publishOrderEvent(savedOrder, OrderStatus.CANCELLED);
+        } else {
+            log.info("Payment status {} for order {} does not require order transition", paymentStatus, orderId);
+        }
+    }
+
     private void publishOrderEvent(Order order, OrderStatus status) {
         try {
             OrderEventDto orderEvent = OrderEventDto.builder()

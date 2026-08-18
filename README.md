@@ -192,9 +192,21 @@ Payment Service
   |
   +---- FAILURE
 
-Payment processing currently uses an idempotency check based on the
-order identifier and publishes successful payment notifications through
+Payment processing uses an idempotency check based on the
+order identifier and publishes PaymentResult events and payment notifications through
 Kafka.
+
+Reliability & Event-Driven Processing
+
+The following production-oriented reliability mechanisms are implemented:
+
+- **Kafka Consumer Retry Strategy:** Consumers use `DefaultErrorHandler` configured with bounded retries (`FixedBackOff` of 1 second, 3 retry attempts / 4 total attempts). Failure handling logs detailed warning messages per attempt.
+- **Dead Letter Topic (DLT) Handling:** When consumer retries are exhausted, `DeadLetterPublishingRecoverer` automatically routes failed records to `<topic>.DLT` (e.g., `payment-notification.DLT`, `order-notification.DLT`, `payment-result.DLT`, `audit-topic.DLT`) and commits the offset to prevent blocking consumer partitions.
+- **PaymentResult Event & State Synchronization:** `PaymentServiceImpl` publishes a `PaymentResultEvent` containing `orderId`, `paymentId`, `status`, `amount`, and `timestamp` for BOTH successful (`COMPLETED`) and failed (`FAILED`) payments. The `Order` service's `PaymentResultConsumer` consumes this event:
+  - On `COMPLETED`: Order transitions from `PENDING` -> `CONFIRMED`.
+  - On `FAILED`: Order transitions from `PENDING` -> `CANCELLED` and inventory reservation is released.
+- **Idempotent Event Consumption:** `OrderServiceImpl.processPaymentResult` is idempotent backed by PostgreSQL persistence. If duplicate `PaymentResult` events arrive, state inspection against stored `order.getStatus()` and persistent `order.paymentId` avoids duplicate transitions, database writes, or event re-publications.
+- **Producer Reliability:** All producers (`Order`, `Payment`, `Product`, `User`) enforce `acks=all`, `enable.idempotence=true`, and `retries=3`.
 
 Engineering Focus
 
@@ -204,21 +216,18 @@ more production-oriented distributed system.
 Planned and implemented improvements are tracked explicitly below so
 that the repository does not claim functionality before it exists.
 
-Reliability
+Reliability (Completed)
 
-Kafka retry and Dead Letter Topic handling
+[x] Kafka retry and Dead Letter Topic handling
+[x] Bounded consumer retries
+[x] Reliable producer configuration (`acks=all`, `enable.idempotence=true`)
+[x] Fixed failure handling for notification consumers (no silent ack, proper exception re-throwing)
 
-Bounded consumer retries
+Order & Payment Consistency (Completed)
 
-Reliable producer configuration
-
-Improved failure handling for notification consumers
-
-Order & Payment Consistency
-
-Event-driven payment-to-order status updates
-
-Idempotency keys for order creation
+[x] Event-driven payment-to-order status updates (`PaymentResult` event)
+[x] Persistence-backed idempotent event consumption
+[ ] Idempotency keys for order creation
 
 Improved distributed transaction handling
 

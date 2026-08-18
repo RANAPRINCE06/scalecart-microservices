@@ -8,6 +8,7 @@ import com.nahid.payment.exception.PaymentException;
 import com.nahid.payment.exception.PaymentNotFoundException;
 import com.nahid.payment.mapper.PaymentMapper;
 import com.nahid.payment.producer.PaymentNotificationProducer;
+import com.nahid.payment.producer.PaymentResultProducer;
 import com.nahid.payment.repository.PaymentRepository;
 import com.nahid.payment.service.PaymentService;
 import com.nahid.payment.util.annotation.Auditable;
@@ -32,6 +33,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentRepository paymentRepository;
     private final PaymentMapper paymentMapper;
     private final PaymentNotificationProducer notificationProducer;
+    private final PaymentResultProducer paymentResultProducer;
 
     @Override
     @Auditable(eventType = "CREATE", entityName = PAYMENT, action = "PROCESS_PAYMENT")
@@ -55,6 +57,7 @@ public class PaymentServiceImpl implements PaymentService {
 
                 payment = paymentRepository.save(payment);
                 notificationProducer.sendPaymentNotification(payment);
+                paymentResultProducer.sendPaymentResult(payment);
 
             } else {
                 payment.setStatus(PaymentStatus.FAILED);
@@ -62,6 +65,7 @@ public class PaymentServiceImpl implements PaymentService {
                 payment.setProcessedAt(LocalDateTime.now());
 
                 payment = paymentRepository.save(payment);
+                paymentResultProducer.sendPaymentResult(payment);
 
             }
 
@@ -70,6 +74,7 @@ public class PaymentServiceImpl implements PaymentService {
             payment.setFailureReason("System error: " + e.getMessage());
             payment.setProcessedAt(LocalDateTime.now());
             payment = paymentRepository.save(payment);
+            paymentResultProducer.sendPaymentResult(payment);
         }
 
         return paymentMapper.toResponseDto(payment);
@@ -161,12 +166,13 @@ public class PaymentServiceImpl implements PaymentService {
 
             // Send notification to Kafka
             notificationProducer.sendPaymentNotification(payment);
+            paymentResultProducer.sendPaymentResult(payment);
         } else {
             payment.setStatus(PaymentStatus.FAILED);
             payment.setFailureReason("Payment gateway declined the transaction on retry");
             payment.setProcessedAt(LocalDateTime.now());
             payment = paymentRepository.save(payment);
-
+            paymentResultProducer.sendPaymentResult(payment);
         }
 
         return paymentMapper.toResponseDto(payment);

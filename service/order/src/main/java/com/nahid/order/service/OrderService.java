@@ -28,4 +28,6 @@ public interface OrderService {
     List<OrderDto> getOrdersByStatus(OrderStatus status);
 
     long getOrderCountByUserAndStatus(Long userId, OrderStatus status);
+
+    void processPaymentResult(com.nahid.order.dto.event.PaymentResultEventDto paymentResultEvent);
 }
