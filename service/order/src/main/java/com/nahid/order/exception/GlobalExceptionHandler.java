@@ -23,6 +23,12 @@ public class GlobalExceptionHandler {
         return ApiResponseUtil.failureWithHttpStatus(ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ResponseEntity<ApiResponse<Object>> handleIdempotencyConflictException(IdempotencyConflictException ex) {
+        log.warn("Idempotency conflict: {}", ex.getMessage());
+        return ApiResponseUtil.failureWithHttpStatus(ex.getMessage(), HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(OrderProcessingException.class)
     public ResponseEntity<ApiResponse<Object>> handleOrderProcessingException(OrderProcessingException ex) {
         return ApiResponseUtil.failureWithHttpStatus(ex.getMessage(), HttpStatus.BAD_REQUEST);

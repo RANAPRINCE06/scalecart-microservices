@@ -208,6 +208,46 @@ The following production-oriented reliability mechanisms are implemented:
 - **Idempotent Event Consumption:** `OrderServiceImpl.processPaymentResult` is idempotent backed by PostgreSQL persistence. If duplicate `PaymentResult` events arrive, state inspection against stored `order.getStatus()` and persistent `order.paymentId` avoids duplicate transitions, database writes, or event re-publications.
 - **Producer Reliability:** All producers (`Order`, `Payment`, `Product`, `User`) enforce `acks=all`, `enable.idempotence=true`, and `retries=3`.
 
+API Idempotency
+
+The platform implements persistence-backed API idempotency for order creation (`POST /api/v1/orders`):
+
+- **Header Support:** Clients supply `Idempotency-Key: <key>` in request headers.
+- **Persistence Model:** Idempotency records are stored in PostgreSQL (`order_schema.order_idempotency_records`) with a `UNIQUE` database constraint on `idempotency_key`.
+- **Request Fingerprinting:** `CreateOrderRequest` is hashed using SHA-256 (`requestHash`).
+- **Duplicate Prevention:**
+  - **First Request:** Saves `IN_PROGRESS` record, executes order saga, updates status to `COMPLETED` with `orderId`.
+  - **Duplicate Request (Same Key + Same Payload):** Returns previously created `OrderDto` with HTTP 200 OK without re-executing order creation or database writes.
+  - **Payload Conflict (Same Key + Different Payload):** Returns HTTP 409 Conflict explaining that the `Idempotency-Key` was already used for a different request.
+  - **Concurrent Requests:** Database `UNIQUE` constraint prevents concurrent duplicate executions; parallel duplicate requests receive HTTP 409 Conflict.
+
+Resilience & Circuit Breakers
+
+Inter-service communication via OpenFeign is hardened against cascading failures:
+
+```
+Client
+  |
+  v
+Order Service
+  |
+  +---- Feign (2s connect / 5s read timeout) ----> Product Service / User Service
+  |                                                        |
+  |                                                     failure
+  |                                                        |
+  |                                                Resilience4j Circuit Breaker
+  |                                                        |
+  +--------------------------------------------------------+
+                           |
+                        Fallback (HTTP 503 Service Unavailable + Log)
+```
+
+- **Explicit Feign Timeouts:** Configured across services (`connect-timeout`: 2000ms, `read-timeout`: 5000ms).
+- **Resilience4j Circuit Breakers:** Configured for `Order` -> `Product` and `Order` -> `User` dependencies (50% failure rate threshold, 10-call sliding window, 10s wait in open state).
+- **Protected Mutations:** Non-idempotent business operations (`createOrder`, `processPayment`, `reserveInventory`) are **not** blindly retried on failure to prevent duplicate business executions.
+- **Structured Fallbacks:** Fallbacks log operational metrics (service name, operation, reference ID) and return HTTP 503 `ApiResponse` payloads without converting business failures to false 200 OK responses.
+- **State Transition Logging:** `ResilienceConfig` registers event consumers to log CircuitBreaker state changes (`CLOSED` -> `OPEN`, `OPEN` -> `HALF_OPEN`).
+
 Engineering Focus
 
 The project is being evolved from the existing implementation toward a
@@ -227,27 +267,15 @@ Order & Payment Consistency (Completed)
 
 [x] Event-driven payment-to-order status updates (`PaymentResult` event)
 [x] Persistence-backed idempotent event consumption
-[ ] Idempotency keys for order creation
+[x] Persistence-backed Idempotency-Key support for `POST /api/v1/orders`
 
-Improved distributed transaction handling
+Resilience (Completed)
 
-Payment notification deduplication
+[x] Feign connect/read timeouts (2s connect / 5s read)
+[x] Resilience4j circuit breakers (`Order` -> `Product`, `Order` -> `User`)
+[x] Controlled retry policies (protecting non-idempotent mutations from blind retries)
+[x] Improved downstream failure fallbacks with operational logging and HTTP 503 status
 
-Resilience
-
-Feign connect/read timeouts
-
-Resilience4j circuit breakers
-
-Controlled retry policies
-
-Improved downstream failure handling
-
-Security
-
-Consistent downstream authentication
-
-Improved authorization for protected endpoints
 
 Correct authenticated-user propagation for audit events
 

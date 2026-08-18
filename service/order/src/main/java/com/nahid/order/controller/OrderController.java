@@ -33,10 +33,42 @@ import java.util.UUID;
 public class OrderController {
 
     private final OrderService orderService;
+    private final com.nahid.order.service.OrderIdempotencyService idempotencyService;
 
-    @Operation(summary = "Create a new order", description = "Create a new order")
+    @Operation(summary = "Create a new order", description = "Create a new order with optional Idempotency-Key header for duplicate protection")
     @PostMapping
-    public ResponseEntity<ApiResponse<OrderDto>> createOrder(@Valid @RequestBody CreateOrderRequest request) {
+    public ResponseEntity<ApiResponse<OrderDto>> createOrder(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CreateOrderRequest request) {
+
+        if (idempotencyKey != null && !idempotencyKey.trim().isEmpty()) {
+            String key = idempotencyKey.trim();
+            String requestHash = idempotencyService.computeRequestHash(request);
+
+            java.util.Optional<OrderDto> existingOrder = idempotencyService.getExistingOrder(key, requestHash);
+            if (existingOrder.isPresent()) {
+                return ApiResponseUtil.success(
+                        existingOrder.get(),
+                        String.format(ApiResponseConstant.CREATE_SUCCESSFUL, AppConstant.ORDER),
+                        HttpStatus.OK
+                );
+            }
+
+            com.nahid.order.entity.OrderIdempotencyRecord record = idempotencyService.createInProcessRecord(key, requestHash);
+            try {
+                OrderDto orderDto = orderService.createOrder(request);
+                idempotencyService.markCompleted(record, orderDto);
+                return ApiResponseUtil.success(
+                        orderDto,
+                        String.format(ApiResponseConstant.CREATE_SUCCESSFUL, AppConstant.ORDER),
+                        HttpStatus.CREATED
+                );
+            } catch (Exception e) {
+                idempotencyService.markFailed(record);
+                throw e;
+            }
+        }
+
         OrderDto orderDto = orderService.createOrder(request);
         return ApiResponseUtil.success(
                 orderDto,

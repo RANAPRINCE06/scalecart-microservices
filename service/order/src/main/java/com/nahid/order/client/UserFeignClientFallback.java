@@ -14,14 +14,14 @@ public class UserFeignClientFallback implements UserClient {
 
     @Override
     public ResponseEntity<ApiResponse<UserResponseDto>> getUserById(Long userId) {
+        log.warn("Fallback executed for downstream service [user-service], operation [getUserById] for userId: {}", userId);
         ApiResponse<UserResponseDto> response = ApiResponse.<UserResponseDto>builder()
-                .statusCode(503)
+                .statusCode(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE.value())
                 .success(false)
-                .message("User service is unavailable")
+                .message("User service is unavailable. Unable to validate user ID: " + userId)
                 .data(null)
                 .timestamp(Instant.now())
                 .build();
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE).body(response);
     }
-
 }
