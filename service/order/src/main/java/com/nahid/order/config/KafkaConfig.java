@@ -36,7 +36,7 @@ public class KafkaConfig {
     @Value("${spring.kafka.consumer.group-id:order-service-group}")
     private String groupId;
 
-    @Value("${kafka.topic.order-notification}")
+    @Value("${kafka.topic.order-notification:order-notification}")
     private String orderNotificationTopic;
 
     @Bean

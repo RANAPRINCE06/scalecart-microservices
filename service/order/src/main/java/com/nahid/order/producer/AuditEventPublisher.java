@@ -16,7 +16,7 @@ public class AuditEventPublisher {
 
     private final KafkaTemplate<String, AuditEventMessageDto> auditKafkaTemplate;
 
-    @Value("${spring.kafka.topic.audit-topic}")
+    @Value("${spring.kafka.topic.audit-topic:audit-topic}")
     private String auditTopic;
 
     public void publishAuditEvent(AuditEventMessageDto auditEventMessageDto) {

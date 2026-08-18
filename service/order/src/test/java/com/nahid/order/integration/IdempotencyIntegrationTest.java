@@ -7,6 +7,7 @@ import com.nahid.order.dto.request.OrderDto;
 import com.nahid.order.dto.request.ShippingAddressDto;
 import com.nahid.order.entity.Order;
 import com.nahid.order.entity.OrderIdempotencyRecord;
+import com.nahid.order.entity.ShippingAddress;
 import com.nahid.order.enums.OrderStatus;
 import com.nahid.order.exception.IdempotencyConflictException;
 import com.nahid.order.repository.OrderIdempotencyRepository;
@@ -17,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -37,7 +40,26 @@ class IdempotencyIntegrationTest {
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine")
             .withDatabaseName("ecommerce")
             .withUsername("nahid")
-            .withPassword("1234");
+            .withPassword("1234")
+            .withInitScript("init-schema.sql");
+
+    @DynamicPropertySource
+    static void overrideProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.PostgreSQLDialect");
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        registry.add("spring.jpa.properties.hibernate.default_schema", () -> "order_schema");
+        registry.add("spring.cloud.config.enabled", () -> "false");
+        registry.add("spring.cloud.discovery.enabled", () -> "false");
+        registry.add("eureka.client.enabled", () -> "false");
+        registry.add("spring.application.name", () -> "order-service");
+        registry.add("kafka.topic.order-notification", () -> "order-notification");
+        registry.add("kafka.topic.payment-result", () -> "payment-result");
+        registry.add("spring.kafka.topic.audit-topic", () -> "audit-topic");
+    }
 
     @Autowired
     private OrderIdempotencyService idempotencyService;
@@ -77,15 +99,27 @@ class IdempotencyIntegrationTest {
         CreateOrderRequest request = createSampleRequest(10L);
         String hash = idempotencyService.computeRequestHash(request);
 
-        UUID orderId = UUID.randomUUID();
+        ShippingAddress address = ShippingAddress.builder()
+                .firstName("Jane")
+                .lastName("Doe")
+                .streetAddress("456 Market St")
+                .city("Tech City")
+                .state("CA")
+                .country("USA")
+                .postalCode("90001")
+                .build();
+
         Order order = Order.builder()
                 .userId(10L)
                 .orderNumber("ORD-IDEM-01")
                 .totalAmount(new BigDecimal("99.99"))
+                .currency("USD")
+                .shippingAddress(address)
                 .status(OrderStatus.PENDING)
                 .build();
-        order.setOrderId(orderId);
-        orderRepository.save(order);
+
+        Order savedOrder = orderRepository.saveAndFlush(order);
+        UUID orderId = savedOrder.getOrderId();
 
         OrderIdempotencyRecord record = idempotencyService.createInProcessRecord(idempotencyKey, hash);
         idempotencyService.markCompleted(record, OrderDto.builder().orderId(orderId).orderNumber("ORD-IDEM-01").build());

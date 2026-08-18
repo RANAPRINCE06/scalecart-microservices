@@ -25,7 +25,7 @@ public class AuditAspect {
     private final AuditEventPublisher auditEventPublisher;
     private final HttpServletRequest request;
 
-    @Value("${spring.application.name}")
+    @Value("${spring.application.name:order-service}")
     private String serviceName;
 
     @Around("@annotation(auditable)")

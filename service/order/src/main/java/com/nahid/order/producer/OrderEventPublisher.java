@@ -22,7 +22,7 @@ public class OrderEventPublisher {
 
     private final KafkaTemplate<String, OrderEventDto> kafkaTemplate;
 
-    @Value("${kafka.topic.order-notification}")
+    @Value("${kafka.topic.order-notification:order-notification}")
     private String orderNotificationTopic;
     public void publishOrderEvent(OrderEventDto orderEvent) {
         validateOrderEvent(orderEvent);
