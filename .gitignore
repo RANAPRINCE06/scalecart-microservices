@@ -1,0 +1,40 @@
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# Compiled files
+*.class
+*.jar
+*.war
+
+# Logs
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Spring Boot
+*.properties.bak
+
+# Maven Wrapper
+!**/mvnw
+!**/mvnw.cmd
+!**/.mvn/wrapper/maven-wrapper.jar
+
+# Secrets — never commit real credentials
+.env
+*.env
+*.pem
+*.key
+*.p12
+*.jks
+*secret*
