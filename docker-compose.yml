@@ -14,6 +14,11 @@ services:
     networks:
       - microservices-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nahid} -d ${POSTGRES_DB:-ecommerce}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   pgadmin:
     container_name: ms_pgadmin
@@ -37,8 +42,11 @@ services:
       - "9411:9411"
     networks:
       - microservices-net
-
-
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9411 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
@@ -51,13 +59,20 @@ services:
       - "22181:2181"
     networks:
       - microservices-net
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   kafka:
     image: confluentinc/cp-kafka:7.3.0
     container_name: ms_kafka
     ports:
       - "9092:9092"
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     environment:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -65,9 +80,13 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-
     networks:
       - microservices-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
   mail-dev:
     container_name: ms-mail-dev
@@ -91,6 +110,11 @@ services:
     networks:
       - microservices-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   microservices-net:

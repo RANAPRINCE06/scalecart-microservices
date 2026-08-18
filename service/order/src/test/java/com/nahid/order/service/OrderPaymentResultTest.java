@@ -66,7 +66,8 @@ class OrderPaymentResultTest {
                 orderStatusService,
                 orderNumberService,
                 orderEventPublisher,
-                orderItemFactory
+                orderItemFactory,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry()
         );
         consumer = new PaymentResultConsumer(orderService);
     }
@@ -198,7 +199,7 @@ class OrderPaymentResultTest {
                 .status(PaymentStatus.COMPLETED)
                 .build();
 
-        consumer.handlePaymentResult(event, "payment-result", 0, 50L, acknowledgment);
+        consumer.handlePaymentResult(event, "payment-result", 0, 50L, "test-correlation-id", acknowledgment);
 
         verify(acknowledgment).acknowledge();
     }

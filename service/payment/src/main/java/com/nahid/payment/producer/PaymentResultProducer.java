@@ -39,12 +39,18 @@ public class PaymentResultProducer {
             log.info("Publishing PaymentResult event to topic: {}. Order ID: {}, Payment ID: {}, Status: {}",
                     paymentResultTopic, payment.getOrderId(), payment.getId(), payment.getStatus());
 
+            String correlationId = org.slf4j.MDC.get("correlationId");
+            if (correlationId == null) {
+                correlationId = java.util.UUID.randomUUID().toString();
+            }
+
             Message<PaymentResultEventDto> message = MessageBuilder
                     .withPayload(event)
                     .setHeader(KafkaHeaders.TOPIC, paymentResultTopic)
                     .setHeader(KafkaHeaders.KEY, payment.getOrderId().toString())
                     .setHeader("paymentId", payment.getId().toString())
                     .setHeader("paymentStatus", payment.getStatus().name())
+                    .setHeader("X-Correlation-ID", correlationId)
                     .build();
 
             CompletableFuture<SendResult<String, PaymentResultEventDto>> future =

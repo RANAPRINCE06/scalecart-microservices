@@ -100,18 +100,23 @@ public class KafkaConfig {
     }
 
     @Bean
-    public DefaultErrorHandler orderKafkaErrorHandler(KafkaTemplate<Object, Object> dltKafkaTemplate) {
+    public DefaultErrorHandler orderKafkaErrorHandler(
+            KafkaTemplate<Object, Object> dltKafkaTemplate,
+            io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(dltKafkaTemplate,
                 (record, ex) -> {
-                    log.error("Sending record key {} to DLT topic {}.DLT after retries exhausted due to: {}",
+                    log.error("kafka.message.dlt - Sending record key {} to DLT topic {}.DLT after retries exhausted: {}",
                             record.key(), record.topic(), ex.getMessage());
+                    meterRegistry.counter("kafka_messages_dlt_total", "service", "order-service", "topic", record.topic()).increment();
                     return new org.apache.kafka.common.TopicPartition(record.topic() + ".DLT", record.partition());
                 });
         FixedBackOff backOff = new FixedBackOff(1000L, 3L);
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
-        errorHandler.setRetryListeners((record, ex, deliveryAttempt) ->
-                log.warn("Retrying consumption for topic {}, key {}, attempt {}/3. Error: {}",
-                        record.topic(), record.key(), deliveryAttempt, ex.getMessage()));
+        errorHandler.setRetryListeners((record, ex, deliveryAttempt) -> {
+            log.warn("kafka.message.retry - Retrying consumption for topic {}, key {}, attempt {}/3. Error: {}",
+                    record.topic(), record.key(), deliveryAttempt, ex.getMessage());
+            meterRegistry.counter("kafka_messages_failed_total", "service", "order-service", "topic", record.topic()).increment();
+        });
         return errorHandler;
     }
 

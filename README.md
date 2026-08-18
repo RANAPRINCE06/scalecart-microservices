@@ -248,6 +248,56 @@ Order Service
 - **Structured Fallbacks:** Fallbacks log operational metrics (service name, operation, reference ID) and return HTTP 503 `ApiResponse` payloads without converting business failures to false 200 OK responses.
 - **State Transition Logging:** `ResilienceConfig` registers event consumers to log CircuitBreaker state changes (`CLOSED` -> `OPEN`, `OPEN` -> `HALF_OPEN`).
 
+Observability & Distributed Tracing
+
+### End-to-End Correlation ID Propagation
+
+```
+Client
+  |
+  v
+Gateway (Generates / Preserves X-Correlation-ID)
+  |
+  +---> Order Service (MDC context: correlationId)
+  |       |
+  |       +--- OpenFeign (X-Correlation-ID) ---> Product / User Service
+  |       |
+  |       +--- Kafka Event (X-Correlation-ID header) ---> Kafka Broker
+  |                                                           |
+  +<--- PaymentResultConsumer / NotificationConsumer <--------+
+          (Extracts X-Correlation-ID into MDC -> Processes Event -> Clears MDC)
+```
+
+> [!NOTE]
+> **Production Problem Solved by Correlation IDs:**
+> Without a correlation ID, debugging a single request across multiple microservices and asynchronous Kafka consumers is extremely difficult. The correlation ID provides a consistent identifier across synchronous HTTP and asynchronous event-driven boundaries.
+
+- **Gateway Generation:** `CorrelationIdGlobalFilter` extracts incoming `X-Correlation-ID` or generates a new UUID.
+- **Spring MDC Integration:** Microservice web filters capture `X-Correlation-ID`, store it in SLF4J MDC (`correlationId`), set the HTTP response header, and clear MDC in a `finally` block to prevent thread context leakage.
+- **Feign Interceptor:** `FeignCorrelationConfig` automatically injects `X-Correlation-ID` into outgoing HTTP headers for downstream Feign client requests.
+- **Kafka Header Propagation:** Producers (`OrderEventPublisher`, `PaymentResultProducer`, `PaymentNotificationProducer`) attach `X-Correlation-ID` as a Kafka header. Consumers (`PaymentResultConsumer`, `NotificationKafkaConsumer`) extract the header, populate MDC during event processing, and clear MDC afterward.
+
+### Prometheus Metrics & Actuator
+
+- **Prometheus Endpoints:** Exposed via `/actuator/prometheus` across services (`gateway`, `order`, `payment`, `notification`, `product`, `user`, `audit`).
+- **Custom Business Metrics:**
+  - `orders_created_total` (Counter)
+  - `payments_completed_total` (Counter)
+  - `payments_failed_total` (Counter)
+  - `kafka_messages_failed_total` (Counter)
+  - `kafka_messages_dlt_total` (Counter)
+  - `order_creation_duration` (Timer)
+  - `payment_processing_duration` (Timer)
+- **Actuator Security:** Endpoint exposure is restricted strictly to `health`, `info`, and `prometheus`. Internal properties, environment configurations, and secrets remain protected.
+
+Integration Testing with Testcontainers
+
+- **Infrastructure Integration Testing:** `OrderWorkflowIntegrationTest`, `KafkaFailureIntegrationTest`, and `IdempotencyIntegrationTest` validate real database persistence and Kafka messaging using Testcontainers.
+- **Test Workflows:**
+  - **Payment Status Sync Test:** Proves `PaymentResultEvent` transitions `Order` state from `PENDING` -> `CONFIRMED`.
+  - **Kafka Retry & DLT Test:** Validates bounded retry attempts and Dead Letter Topic recovery on processing exceptions.
+  - **Idempotency Integration Test:** Verifies `POST /api/v1/orders` returns cached order on identical key + payload, and HTTP 409 Conflict on payload mismatch.
+
 Engineering Focus
 
 The project is being evolved from the existing implementation toward a
@@ -275,6 +325,15 @@ Resilience (Completed)
 [x] Resilience4j circuit breakers (`Order` -> `Product`, `Order` -> `User`)
 [x] Controlled retry policies (protecting non-idempotent mutations from blind retries)
 [x] Improved downstream failure fallbacks with operational logging and HTTP 503 status
+
+Observability & Integration Testing (Completed)
+
+[x] End-to-end `X-Correlation-ID` header generation and downstream HTTP/Feign propagation
+[x] Asynchronous Kafka header context propagation & thread-safe MDC logging
+[x] Micrometer Prometheus metrics (`/actuator/prometheus`) and custom business counters/timers
+[x] Containerized Docker healthchecks in `docker-compose.yml`
+[x] Testcontainers integration tests for database persistence, Kafka DLT, and API idempotency
+
 
 
 Correct authenticated-user propagation for audit events

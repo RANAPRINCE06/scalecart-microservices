@@ -27,10 +27,16 @@ public class OrderEventPublisher {
     public void publishOrderEvent(OrderEventDto orderEvent) {
         validateOrderEvent(orderEvent);
 
+        String correlationId = org.slf4j.MDC.get("correlationId");
+        if (correlationId == null) {
+            correlationId = java.util.UUID.randomUUID().toString();
+        }
+
         Message<OrderEventDto> message = MessageBuilder
                 .withPayload(orderEvent)
                 .setHeader(KafkaHeaders.TOPIC, orderNotificationTopic)
                 .setHeader(KafkaHeaders.KEY, orderEvent.getOrderId().toString())
+                .setHeader("X-Correlation-ID", correlationId)
                 .build();
 
         CompletableFuture<SendResult<String, OrderEventDto>> future = kafkaTemplate.send(message);

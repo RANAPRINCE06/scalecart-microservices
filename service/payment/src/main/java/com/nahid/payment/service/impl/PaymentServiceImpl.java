@@ -34,11 +34,12 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentMapper paymentMapper;
     private final PaymentNotificationProducer notificationProducer;
     private final PaymentResultProducer paymentResultProducer;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Override
     @Auditable(eventType = "CREATE", entityName = PAYMENT, action = "PROCESS_PAYMENT")
     public PaymentResponseDto processPayment(PaymentRequestDto requestDto) {
-
+        long startTime = System.currentTimeMillis();
         if (paymentRepository.existsByOrderId(requestDto.getOrderId())) {
             throw new PaymentException("Payment already exists for order: " + requestDto.getOrderId());
         }
@@ -59,6 +60,10 @@ public class PaymentServiceImpl implements PaymentService {
                 notificationProducer.sendPaymentNotification(payment);
                 paymentResultProducer.sendPaymentResult(payment);
 
+                meterRegistry.counter("payments_completed_total", "service", "payment-service").increment();
+                log.info("payment.completed - PaymentId: {}, OrderId: {}, Amount: {}",
+                        payment.getId(), payment.getOrderId(), payment.getAmount());
+
             } else {
                 payment.setStatus(PaymentStatus.FAILED);
                 payment.setFailureReason("Payment gateway declined the transaction");
@@ -67,12 +72,21 @@ public class PaymentServiceImpl implements PaymentService {
                 payment = paymentRepository.save(payment);
                 paymentResultProducer.sendPaymentResult(payment);
 
+                meterRegistry.counter("payments_failed_total", "service", "payment-service").increment();
+                log.warn("payment.failed - PaymentId: {}, OrderId: {}, Reason: {}",
+                        payment.getId(), payment.getOrderId(), payment.getFailureReason());
+
             }
+
+            meterRegistry.timer("payment_processing_duration", "service", "payment-service")
+                    .record(System.currentTimeMillis() - startTime, java.util.concurrent.TimeUnit.MILLISECONDS);
 
         } catch (Exception e) {
             payment.setStatus(PaymentStatus.FAILED);
             payment.setFailureReason("System error: " + e.getMessage());
             payment.setProcessedAt(LocalDateTime.now());
+            meterRegistry.counter("payments_failed_total", "service", "payment-service").increment();
+            log.error("payment.failed - OrderId: {}, Error: {}", requestDto.getOrderId(), e.getMessage());
             payment = paymentRepository.save(payment);
             paymentResultProducer.sendPaymentResult(payment);
         }

@@ -28,17 +28,22 @@ public class PaymentResultConsumer {
             @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
             @Header(KafkaHeaders.OFFSET) long offset,
+            @Header(name = "X-Correlation-ID", required = false) String correlationHeader,
             Acknowledgment acknowledgment) {
 
-        log.info("Received PaymentResult event from topic: {}, partition: {}, offset: {}, orderId: {}, paymentId: {}, status: {}",
-                topic, partition, offset,
-                paymentResultEvent != null ? paymentResultEvent.getOrderId() : null,
-                paymentResultEvent != null ? paymentResultEvent.getPaymentId() : null,
-                paymentResultEvent != null ? paymentResultEvent.getStatus() : null);
+        String correlationId = (correlationHeader != null && !correlationHeader.isBlank())
+                ? correlationHeader : java.util.UUID.randomUUID().toString();
+        org.slf4j.MDC.put("correlationId", correlationId);
 
         try {
+            log.info("kafka.message.received - Topic: {}, Partition: {}, Offset: {}, orderId: {}, paymentId: {}, status: {}",
+                    topic, partition, offset,
+                    paymentResultEvent != null ? paymentResultEvent.getOrderId() : null,
+                    paymentResultEvent != null ? paymentResultEvent.getPaymentId() : null,
+                    paymentResultEvent != null ? paymentResultEvent.getStatus() : null);
+
             if (paymentResultEvent == null || paymentResultEvent.getOrderId() == null) {
-                log.error("PaymentResult event missing required orderId");
+                log.error("kafka.message.error - PaymentResult event missing required orderId");
                 acknowledgment.acknowledge();
                 return;
             }
@@ -46,13 +51,15 @@ public class PaymentResultConsumer {
             orderService.processPaymentResult(paymentResultEvent);
             acknowledgment.acknowledge();
 
-            log.info("PaymentResult processed successfully for orderId: {}", paymentResultEvent.getOrderId());
+            log.info("kafka.message.processed - PaymentResult processed successfully for orderId: {}", paymentResultEvent.getOrderId());
 
         } catch (Exception e) {
-            log.error("Error processing PaymentResult for orderId: {}. Error: {}",
+            log.error("kafka.message.error - Error processing PaymentResult for orderId: {}. Error: {}",
                     paymentResultEvent != null ? paymentResultEvent.getOrderId() : "unknown",
                     e.getMessage(), e);
             throw new RuntimeException("Failed to process PaymentResult, delegating to Kafka errorHandler/DLT", e);
+        } finally {
+            org.slf4j.MDC.remove("correlationId");
         }
     }
 }

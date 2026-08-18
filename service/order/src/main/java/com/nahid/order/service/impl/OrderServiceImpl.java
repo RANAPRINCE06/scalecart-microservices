@@ -49,10 +49,12 @@ public class OrderServiceImpl implements OrderService {
     private final OrderNumberService orderNumberService;
     private final OrderEventPublisher orderEventPublisher;
     private final OrderItemFactory orderItemFactory;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Override
     @Auditable(eventType = "CREATE", entityName = ORDER, action = "CREATE_ORDER")
     public OrderDto createOrder(CreateOrderRequest request) {
+        long startTime = System.currentTimeMillis();
         try {
             userValidationService.validateUserForOrder(request.getUserId());
 
@@ -68,9 +70,17 @@ public class OrderServiceImpl implements OrderService {
             Order savedOrder = context.getSavedOrder();
             publishOrderEvent(savedOrder, OrderStatus.PENDING);
 
+            meterRegistry.counter("orders_created_total", "service", "order-service").increment();
+            meterRegistry.timer("order_creation_duration", "service", "order-service")
+                    .record(System.currentTimeMillis() - startTime, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            log.info("order.created - OrderId: {}, OrderNumber: {}, UserId: {}",
+                    savedOrder.getOrderId(), savedOrder.getOrderNumber(), savedOrder.getUserId());
+
             return orderMapper.toDto(savedOrder);
 
         } catch (Exception e) {
+            log.error("order.creation_failed - UserId: {}, Error: {}", request.getUserId(), e.getMessage());
             throw new OrderProcessingException(
                     String.format(ExceptionMessageConstant.ORDER_CREATION_FAILED, e.getMessage()), e);
         }

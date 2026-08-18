@@ -24,19 +24,24 @@ public class NotificationKafkaConsumer {
             topics = "${kafka.topic.payment-notification}",
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "paymentKafkaListenerContainerFactory"
-    )   public void handlePaymentNotification(
+       public void handlePaymentNotification(
             @Payload PaymentNotificationDto paymentNotificationDto,
             @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
             @Header(KafkaHeaders.OFFSET) long offset,
+            @Header(name = "X-Correlation-ID", required = false) String correlationHeader,
             Acknowledgment acknowledgment) {
 
-        log.info("Received payment notification from topic: {}, partition: {}, offset: {}, paymentId: {}",
-                topic, partition, offset, paymentNotificationDto.getPaymentId());
+        String correlationId = (correlationHeader != null && !correlationHeader.isBlank())
+                ? correlationHeader : java.util.UUID.randomUUID().toString();
+        org.slf4j.MDC.put("correlationId", correlationId);
 
         try {
+            log.info("kafka.message.received - Topic: {}, partition: {}, offset: {}, paymentId: {}",
+                    topic, partition, offset, paymentNotificationDto.getPaymentId());
+
             if (paymentNotificationDto.getPaymentId() == null) {
-                log.error("Payment notification missing required paymentId");
+                log.error("kafka.message.error - Payment notification missing required paymentId");
                 return;
             }
             if (paymentNotificationDto.getCustomerId() == null || paymentNotificationDto.getCustomerId().isEmpty()) {
@@ -46,9 +51,11 @@ public class NotificationKafkaConsumer {
             acknowledgment.acknowledge();
 
         } catch (Exception e) {
-            log.error("Error processing payment notification for paymentId: {}. Error: {}",
+            log.error("kafka.message.error - Error processing payment notification for paymentId: {}. Error: {}",
                     paymentNotificationDto.getPaymentId(), e.getMessage(), e);
             throw new RuntimeException("Failed to process payment notification, delegating to Kafka errorHandler/DLT", e);
+        } finally {
+            org.slf4j.MDC.remove("correlationId");
         }
     }
 
@@ -62,26 +69,30 @@ public class NotificationKafkaConsumer {
             @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
             @Header(KafkaHeaders.OFFSET) long offset,
+            @Header(name = "X-Correlation-ID", required = false) String correlationHeader,
             Acknowledgment acknowledgment) {
 
-        log.info("Received order notification from topic: {}, partition: {}, offset: {}, orderId: {}",
-                topic, partition, offset, orderEventDto.getOrderId());
+        String correlationId = (correlationHeader != null && !correlationHeader.isBlank())
+                ? correlationHeader : java.util.UUID.randomUUID().toString();
+        org.slf4j.MDC.put("correlationId", correlationId);
 
         try {
+            log.info("kafka.message.received - Topic: {}, partition: {}, offset: {}, orderId: {}",
+                    topic, partition, offset, orderEventDto.getOrderId());
 
             if (orderEventDto.getOrderId() == null) {
-                log.error("Order notification missing required orderId");
+                log.error("kafka.message.error - Order notification missing required orderId");
                 return;
             }
 
             if (orderEventDto.getCustomerId() == null || orderEventDto.getCustomerId().isEmpty()) {
-                log.error("Order notification missing required customerId for orderId: {}",
+                log.error("kafka.message.error - Order notification missing required customerId for orderId: {}",
                         orderEventDto.getOrderId());
                 return;
             }
 
             if (orderEventDto.getEventType() == null || orderEventDto.getEventType().isEmpty()) {
-                log.error("Order notification missing required eventType for orderId: {}",
+                log.error("kafka.message.error - Order notification missing required eventType for orderId: {}",
                         orderEventDto.getOrderId());
                 return;
             }
@@ -89,13 +100,15 @@ public class NotificationKafkaConsumer {
             notificationService.processOrderNotification(orderEventDto);
             acknowledgment.acknowledge();
 
-            log.info("Order notification processed successfully for orderId: {}",
+            log.info("kafka.message.processed - Order notification processed successfully for orderId: {}",
                     orderEventDto.getOrderId());
 
         } catch (Exception e) {
-            log.error("Error processing order notification for orderId: {}. Error: {}",
+            log.error("kafka.message.error - Error processing order notification for orderId: {}. Error: {}",
                     orderEventDto.getOrderId(), e.getMessage(), e);
             throw new RuntimeException("Failed to process order notification, delegating to Kafka errorHandler/DLT", e);
+        } finally {
+            org.slf4j.MDC.remove("correlationId");
         }
     }
 }

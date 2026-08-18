@@ -41,11 +41,17 @@ public class PaymentNotificationProducer {
             log.info("Sending payment notification to Kafka. Payment ID: {}, Topic: {}",
                     payment.getId(), paymentNotificationTopic);
 
+            String correlationId = org.slf4j.MDC.get("correlationId");
+            if (correlationId == null) {
+                correlationId = java.util.UUID.randomUUID().toString();
+            }
+
             Message<PaymentNotificationDto> message = MessageBuilder
                     .withPayload(notification)
                     .setHeader("paymentId", payment.getId().toString())
                     .setHeader("paymentStatus", payment.getStatus().name())
                     .setHeader(KafkaHeaders.TOPIC, paymentNotificationTopic)
+                    .setHeader("X-Correlation-ID", correlationId)
                     .build();
 
             CompletableFuture<SendResult<String, PaymentNotificationDto>> future = kafkaTemplate.send(message);
